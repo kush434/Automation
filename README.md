@@ -61,3 +61,12 @@ This revision fixes the noVNC HTTP 500 caused when Nginx workers cannot read
 `/etc/nginx/.htpasswd`: the entrypoint now assigns the password file to
 `www-data` and keeps it mode `640`. It also preserves the `/websockify` path
 when proxying WebSocket traffic to websockify.
+
+
+## Debian build dependency fix
+
+This revision pins the base image to Debian Bookworm, installs Chromium runtime
+libraries using Debian package names, and runs `playwright install chromium`
+without `--with-deps`. The previous build failed because Playwright's automatic
+apt dependency step requested `ttf-unifont` and `ttf-ubuntu-font-family`, names
+that are not available in the configured Debian package repositories.
