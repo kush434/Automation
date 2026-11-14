@@ -530,17 +530,17 @@ def flow_controller():
         raise HTTPException(status_code=503, detail=f"Flow browser controller unavailable: {exc}")
 
 @app.get("/flow/status")
-def flow_status(credentials: HTTPAuthorizationCredentials = Depends(run_auth)):
+async def flow_status(credentials: HTTPAuthorizationCredentials = Depends(run_auth)):
     require_run_token(credentials)
-    return flow_controller().status()
+    return await flow_controller().status()
 
 @app.post("/flow/start")
-def flow_start(credentials: HTTPAuthorizationCredentials = Depends(run_auth)):
+async def flow_start(credentials: HTTPAuthorizationCredentials = Depends(run_auth)):
     require_run_token(credentials)
     if env("FLOW_AUTOMATION_ENABLED", "true").lower() not in ("1", "true", "yes", "on"):
         raise HTTPException(status_code=403, detail="Set FLOW_AUTOMATION_ENABLED=true in Railway Variables.")
     try:
-        result = flow_controller().start_browser()
+        result = await flow_controller().start_browser()
         base_url = env("PUBLIC_BASE_URL", "").rstrip("/")
         browser_url = f"{base_url}/vnc/vnc.html?autoconnect=true&resize=remote" if base_url else None
         tg_token, tg_chat = env("TELEGRAM_BOT_TOKEN"), env("TELEGRAM_CHAT_ID")
@@ -556,42 +556,42 @@ def flow_start(credentials: HTTPAuthorizationCredentials = Depends(run_auth)):
         raise HTTPException(status_code=500, detail=f"Could not start Flow browser: {exc}")
 
 @app.get("/flow/screenshot")
-def flow_screenshot(credentials: HTTPAuthorizationCredentials = Depends(run_auth)):
+async def flow_screenshot(credentials: HTTPAuthorizationCredentials = Depends(run_auth)):
     require_run_token(credentials)
     try:
-        flow_controller().screenshot(FLOW_SCREENSHOT)
+        await flow_controller().screenshot(FLOW_SCREENSHOT)
         return FileResponse(FLOW_SCREENSHOT, media_type="image/png", filename="flow-browser.png")
     except Exception as exc:
         raise HTTPException(status_code=409, detail=str(exc))
 
 @app.post("/flow/click")
-def flow_click(payload: FlowClickRequest, credentials: HTTPAuthorizationCredentials = Depends(run_auth)):
+async def flow_click(payload: FlowClickRequest, credentials: HTTPAuthorizationCredentials = Depends(run_auth)):
     require_run_token(credentials)
-    try: return flow_controller().click(payload.x, payload.y)
+    try: return await flow_controller().click(payload.x, payload.y)
     except Exception as exc: raise HTTPException(status_code=400, detail=str(exc))
 
 @app.post("/flow/type")
-def flow_type(payload: FlowTypeRequest, credentials: HTTPAuthorizationCredentials = Depends(run_auth)):
+async def flow_type(payload: FlowTypeRequest, credentials: HTTPAuthorizationCredentials = Depends(run_auth)):
     require_run_token(credentials)
-    try: return flow_controller().type_text(payload.text)
+    try: return await flow_controller().type_text(payload.text)
     except Exception as exc: raise HTTPException(status_code=400, detail=str(exc))
 
 @app.post("/flow/press")
-def flow_press(payload: FlowKeyRequest, credentials: HTTPAuthorizationCredentials = Depends(run_auth)):
+async def flow_press(payload: FlowKeyRequest, credentials: HTTPAuthorizationCredentials = Depends(run_auth)):
     require_run_token(credentials)
-    try: return flow_controller().press_key(payload.key)
+    try: return await flow_controller().press_key(payload.key)
     except Exception as exc: raise HTTPException(status_code=400, detail=str(exc))
 
 @app.post("/flow/fill-prompt")
-def flow_fill_prompt(payload: FlowPromptRequest, credentials: HTTPAuthorizationCredentials = Depends(run_auth)):
+async def flow_fill_prompt(payload: FlowPromptRequest, credentials: HTTPAuthorizationCredentials = Depends(run_auth)):
     require_run_token(credentials)
-    try: return flow_controller().fill_prompt(payload.prompt)
+    try: return await flow_controller().fill_prompt(payload.prompt)
     except Exception as exc: raise HTTPException(status_code=400, detail=str(exc))
 
 @app.post("/flow/stop")
-def flow_stop(credentials: HTTPAuthorizationCredentials = Depends(run_auth)):
+async def flow_stop(credentials: HTTPAuthorizationCredentials = Depends(run_auth)):
     require_run_token(credentials)
-    try: return flow_controller().close_browser()
+    try: return await flow_controller().close_browser()
     except Exception as exc: raise HTTPException(status_code=500, detail=str(exc))
 
 @app.get("/")
