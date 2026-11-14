@@ -6,42 +6,18 @@ from PIL import Image, ImageDraw, ImageFont
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import JSONResponse, FileResponse
+from pydantic import BaseModel, Field
 
 APP_DIR = Path(__file__).parent
 OUT_DIR = Path(os.getenv("OUTPUT_DIR", "/data/insta-reels"))
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 JOBS_DIR = OUT_DIR / "jobs"
 JOBS_DIR.mkdir(parents=True, exist_ok=True)
-app = FastAPI(title="Kids Wild Animal Stories", version="0.2.1")
+app = FastAPI(title="Kids Wild Animal Stories + Flow Controller", version="0.3.0")
 run_auth = HTTPBearer(auto_error=False)
 
 def env(name, default=""):
     return os.getenv(name, default).strip()
-
-
-def telegram_notify(message):
-    """Send best-effort Telegram alerts; notification failures never stop reel jobs."""
-    bot_token = env("TELEGRAM_BOT_TOKEN")
-    chat_id = env("TELEGRAM_CHAT_ID")
-    if not bot_token or not chat_id:
-        return False
-    try:
-        response = requests.post(
-            f"https://api.telegram.org/bot{bot_token}/sendMessage",
-            json={"chat_id": chat_id, "text": message, "disable_web_page_preview": True},
-            timeout=12,
-        )
-        response.raise_for_status()
-        return bool(response.json().get("ok"))
-    except Exception as exc:
-        # Do not print secrets or let Telegram outages break video generation.
-        print(f"Telegram notification failed: {type(exc).__name__}")
-        return False
-
-
-def public_url(path):
-    base = env("PUBLIC_BASE_URL").rstrip("/")
-    return f"{base}{path}" if base else path
 
 def gemini_story():
     key = env("GEMINI_API_KEY")
@@ -472,9 +448,6 @@ def video_worker(job_id, story):
                 "provider": "Free Wikimedia Commons images + FFmpeg", "quality": "480p",
                 "ai_video_clips": 0, "paid_api_calls": 0})
     save_job(job)
-    telegram_notify(
-        f"🎬 Reel generation started\nJob: {job_id}\nStory: {story.get('series_title', 'Kids Wild Animal Story')}\nScenes: {len(story.get('clips', []))}"
-    )
     try:
         clips = story.get("clips", [])
         if len(clips) < 2:
@@ -501,13 +474,9 @@ def video_worker(job_id, story):
                     "image_source": FREE_IMAGE_SOURCE, "image_credits_file": f"/media/{job_id}-image-credits.json",
                     "budget": budget_summary()})
         save_job(job)
-        telegram_notify(
-            f"✅ Reel ready!\nJob: {job_id}\nStory: {story.get('series_title', 'Kids Wild Animal Story')}\nVideo: {public_url(job['video_url'])}"
-        )
     except Exception as e:
         job.update({"video_status": "failed", "video_error": str(e)[:1800], "budget": budget_summary()})
         save_job(job)
-        telegram_notify(f"❌ Reel generation failed\nJob: {job_id}\nError: {str(e)[:900]}")
 
 def start_video_job(job_id, story):
     job = read_job(job_id) or {"job_id": job_id}
@@ -533,39 +502,99 @@ def save_story(story):
     latest.write_text(json.dumps(story,ensure_ascii=False,indent=2),encoding="utf-8")
     return p
 
+
+# --- Google Flow browser controller (user-authorized UI automation) ---
+FLOW_SCREENSHOT = OUT_DIR / "flow-browser.png"
+
+def require_run_token(credentials):
+    token = env("RUN_TOKEN")
+    supplied = credentials.credentials if credentials else ""
+    if not token or supplied != token:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+class FlowClickRequest(BaseModel):
+    x: int = Field(ge=0, le=5000)
+    y: int = Field(ge=0, le=5000)
+class FlowTypeRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=12000)
+class FlowKeyRequest(BaseModel):
+    key: str = Field(min_length=1, max_length=40)
+class FlowPromptRequest(BaseModel):
+    prompt: str = Field(min_length=1, max_length=12000)
+
+def flow_controller():
+    try:
+        import flow_controller as controller
+        return controller
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Flow browser controller unavailable: {exc}")
+
+@app.get("/flow/status")
+def flow_status(credentials: HTTPAuthorizationCredentials = Depends(run_auth)):
+    require_run_token(credentials)
+    return flow_controller().status()
+
+@app.post("/flow/start")
+def flow_start(credentials: HTTPAuthorizationCredentials = Depends(run_auth)):
+    require_run_token(credentials)
+    if env("FLOW_AUTOMATION_ENABLED", "true").lower() not in ("1", "true", "yes", "on"):
+        raise HTTPException(status_code=403, detail="Set FLOW_AUTOMATION_ENABLED=true in Railway Variables.")
+    try:
+        result = flow_controller().start_browser()
+        return {**result, "screenshot_url": "/flow/screenshot",
+                "next_step": "Open /flow/screenshot, then sign in yourself if Google asks. Do not share passwords or cookies."}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Could not start Flow browser: {exc}")
+
+@app.get("/flow/screenshot")
+def flow_screenshot(credentials: HTTPAuthorizationCredentials = Depends(run_auth)):
+    require_run_token(credentials)
+    try:
+        flow_controller().screenshot(FLOW_SCREENSHOT)
+        return FileResponse(FLOW_SCREENSHOT, media_type="image/png", filename="flow-browser.png")
+    except Exception as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+@app.post("/flow/click")
+def flow_click(payload: FlowClickRequest, credentials: HTTPAuthorizationCredentials = Depends(run_auth)):
+    require_run_token(credentials)
+    try: return flow_controller().click(payload.x, payload.y)
+    except Exception as exc: raise HTTPException(status_code=400, detail=str(exc))
+
+@app.post("/flow/type")
+def flow_type(payload: FlowTypeRequest, credentials: HTTPAuthorizationCredentials = Depends(run_auth)):
+    require_run_token(credentials)
+    try: return flow_controller().type_text(payload.text)
+    except Exception as exc: raise HTTPException(status_code=400, detail=str(exc))
+
+@app.post("/flow/press")
+def flow_press(payload: FlowKeyRequest, credentials: HTTPAuthorizationCredentials = Depends(run_auth)):
+    require_run_token(credentials)
+    try: return flow_controller().press_key(payload.key)
+    except Exception as exc: raise HTTPException(status_code=400, detail=str(exc))
+
+@app.post("/flow/fill-prompt")
+def flow_fill_prompt(payload: FlowPromptRequest, credentials: HTTPAuthorizationCredentials = Depends(run_auth)):
+    require_run_token(credentials)
+    try: return flow_controller().fill_prompt(payload.prompt)
+    except Exception as exc: raise HTTPException(status_code=400, detail=str(exc))
+
+@app.post("/flow/stop")
+def flow_stop(credentials: HTTPAuthorizationCredentials = Depends(run_auth)):
+    require_run_token(credentials)
+    try: return flow_controller().close_browser()
+    except Exception as exc: raise HTTPException(status_code=500, detail=str(exc))
+
 @app.get("/")
 def home():
     return {"name":"Kids Wild Animal Stories","status":"online",
             "mode":"Free Wikimedia Commons animal images + animated scenes + Hindi voiceover + original boom music + auto-join + CTA",
             "video_generation_enabled": True,
             "media_api_budget": budget_summary(),
-            "target":"3 story packs per day"}
+            "target":"3 story packs per day", "flow_browser_controller": True}
 
 @app.get("/health")
 def health(): return {"ok":True}
-
-@app.post("/telegram/test")
-def telegram_test(credentials: HTTPAuthorizationCredentials = Depends(run_auth)):
-    token = env("RUN_TOKEN")
-    supplied = credentials.credentials if credentials else ""
-    if not token or supplied != token:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-    if not env("TELEGRAM_BOT_TOKEN") or not env("TELEGRAM_CHAT_ID"):
-        raise HTTPException(status_code=400, detail="Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in Railway Variables first.")
-    if not telegram_notify("✅ Kids Wild Animal Stories: Telegram notifications are connected!"):
-        raise HTTPException(status_code=502, detail="Telegram send failed. Check bot token, chat ID, and that you started the bot chat.")
-    return {"ok": True, "message": "Telegram test message sent."}
-
-@app.post("/telegram/verification-needed")
-def telegram_verification_needed(credentials: HTTPAuthorizationCredentials = Depends(run_auth)):
-    """Authenticated hook for future browser automation to request human verification."""
-    token = env("RUN_TOKEN")
-    supplied = credentials.credentials if credentials else ""
-    if not token or supplied != token:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-    if not telegram_notify("⚠️ Google Flow needs your attention\nA login verification, CAPTCHA, or account confirmation may be required. Open the Flow browser session, complete the check yourself, then resume the job."):
-        raise HTTPException(status_code=502, detail="Telegram notification could not be delivered.")
-    return {"ok": True, "message": "Verification alert sent to Telegram."}
 
 @app.post("/run")
 def run_now(credentials: HTTPAuthorizationCredentials = Depends(run_auth)):
