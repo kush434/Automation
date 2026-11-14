@@ -36,3 +36,20 @@ Open a Flow project/create screen yourself, then call `POST /flow/fill-prompt` w
 - Google Flow does not provide a supported public API for using Flow credits from Railway. This is browser UI automation and may break if Google changes the interface or restricts automated use.
 - A Railway cloud browser is not a normal interactive desktop. Screenshot + authenticated click/type endpoints provide limited remote interaction, not a full live desktop. Google may still require manual intervention and some login flows may not work in a hosted browser.
 - The existing free Wikimedia + FFmpeg Reel renderer remains available. This first browser integration does not yet automatically download Flow clips or replace the free renderer.
+
+
+## Private mobile browser link (noVNC)
+
+This upgrade exposes the Railway Chromium desktop through noVNC behind HTTP Basic Authentication.
+It is intended for manual Google login and verification only; do not share the link or credentials.
+
+Add these Railway Variables:
+- `PUBLIC_BASE_URL=https://YOUR-RAILWAY-DOMAIN`
+- `BROWSER_ACCESS_USER=flow` (or your own username)
+- `BROWSER_ACCESS_PASSWORD` — create a long, unique password
+- Keep `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` configured
+- Keep `FLOW_AUTOMATION_ENABLED=true` and `FLOW_PROFILE_DIR=/data/flow-profile`
+
+After deploy, call authenticated `POST /flow/start`. The app starts Chromium and sends the private browser URL to your Telegram chat. Open the link on your phone; the browser asks for the Basic Auth username/password, then shows the remote desktop. Sign into Google yourself. Never send Google passwords, OTPs, cookies, or session files through Telegram.
+
+The noVNC page and WebSocket are protected by HTTP Basic Auth. Keep the password private and rotate it if exposed. The browser is still subject to Google's normal verification and product restrictions. This does not create a supported Google Flow API and does not guarantee automated video generation/download; it only provides a private remote desktop for the user-authorized browser.

@@ -541,8 +541,17 @@ def flow_start(credentials: HTTPAuthorizationCredentials = Depends(run_auth)):
         raise HTTPException(status_code=403, detail="Set FLOW_AUTOMATION_ENABLED=true in Railway Variables.")
     try:
         result = flow_controller().start_browser()
-        return {**result, "screenshot_url": "/flow/screenshot",
-                "next_step": "Open /flow/screenshot, then sign in yourself if Google asks. Do not share passwords or cookies."}
+        base_url = env("PUBLIC_BASE_URL", "").rstrip("/")
+        browser_url = f"{base_url}/vnc/vnc.html?autoconnect=true&resize=remote" if base_url else None
+        tg_token, tg_chat = env("TELEGRAM_BOT_TOKEN"), env("TELEGRAM_CHAT_ID")
+        if browser_url and tg_token and tg_chat:
+            try:
+                requests.post(f"https://api.telegram.org/bot{tg_token}/sendMessage",
+                    json={"chat_id": tg_chat, "text": f"Private Google Flow browser ready. Open this link and sign in yourself:\n{browser_url}\nBrowser access username: {env('BROWSER_ACCESS_USER', 'flow')}\nUse the browser password you configured in Railway Variables. Never share your Google password or OTP."}, timeout=12)
+            except Exception:
+                pass
+        return {**result, "screenshot_url": "/flow/screenshot", "browser_url": browser_url,
+                "next_step": "Open the private /vnc/ link sent to Telegram. Sign in yourself; never share passwords or OTPs."}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Could not start Flow browser: {exc}")
 
