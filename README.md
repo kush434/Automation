@@ -53,3 +53,11 @@ Add these Railway Variables:
 After deploy, call authenticated `POST /flow/start`. The app starts Chromium and sends the private browser URL to your Telegram chat. Open the link on your phone; the browser asks for the Basic Auth username/password, then shows the remote desktop. Sign into Google yourself. Never send Google passwords, OTPs, cookies, or session files through Telegram.
 
 The noVNC page and WebSocket are protected by HTTP Basic Auth. Keep the password private and rotate it if exposed. The browser is still subject to Google's normal verification and product restrictions. This does not create a supported Google Flow API and does not guarantee automated video generation/download; it only provides a private remote desktop for the user-authorized browser.
+
+
+## Remote-browser 500 fix
+
+This revision fixes the noVNC HTTP 500 caused when Nginx workers cannot read
+`/etc/nginx/.htpasswd`: the entrypoint now assigns the password file to
+`www-data` and keeps it mode `640`. It also preserves the `/websockify` path
+when proxying WebSocket traffic to websockify.
