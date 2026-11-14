@@ -61,17 +61,60 @@ async def start_browser():
             return await _status_unlocked()
         profile = Path(_env("FLOW_PROFILE_DIR", "/data/flow-profile"))
         profile.mkdir(parents=True, exist_ok=True)
+
+        # Wait for Xvfb to create its display socket before launching headed Chromium.
+        display_socket = Path("/tmp/.X11-unix/X99")
+        for _ in range(40):
+            if display_socket.exists():
+                break
+            await asyncio.sleep(0.5)
+        if not display_socket.exists():
+            raise RuntimeError("Virtual display :99 is not ready. Check the Railway Xvfb service logs.")
+
+        # Remove stale Chromium singleton markers left by an unclean container restart.
+        for marker in ("SingletonLock", "SingletonSocket", "SingletonCookie"):
+            try:
+                (profile / marker).unlink(missing_ok=True)
+            except OSError:
+                pass
+
         _PLAY = await async_playwright().start()
-        _CONTEXT = await _PLAY.chromium.launch_persistent_context(
-            user_data_dir=str(profile), headless=False,
-            args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled"],
-            viewport={"width": 1365, "height": 900}, accept_downloads=True
-        )
-        _PAGE = _CONTEXT.pages[0] if _CONTEXT.pages else await _CONTEXT.new_page()
-        await _PAGE.goto("https://flow.google.com/", wait_until="domcontentloaded", timeout=90000)
-        _STATE.update({"running": True, "url": _PAGE.url, "title": await _PAGE.title(), "last_error": None})
-        await _check_verification()
-        return dict(_STATE)
+        try:
+            _CONTEXT = await _PLAY.chromium.launch_persistent_context(
+                user_data_dir=str(profile),
+                headless=False,
+                timeout=120000,
+                args=[
+                    "--no-sandbox",
+                    "--disable-setuid-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-gpu",
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                    "--disable-blink-features=AutomationControlled",
+                ],
+                viewport={"width": 1365, "height": 900},
+                accept_downloads=True,
+            )
+            _PAGE = _CONTEXT.pages[0] if _CONTEXT.pages else await _CONTEXT.new_page()
+            await _PAGE.goto("https://flow.google.com/", wait_until="domcontentloaded", timeout=90000)
+            _STATE.update({"running": True, "url": _PAGE.url, "title": await _PAGE.title(), "last_error": None})
+            await _check_verification()
+            return dict(_STATE)
+        except Exception:
+            if _CONTEXT:
+                try:
+                    await _CONTEXT.close()
+                except Exception:
+                    pass
+            _CONTEXT = _PAGE = None
+            if _PLAY:
+                try:
+                    await _PLAY.stop()
+                except Exception:
+                    pass
+            _PLAY = None
+            raise
 
 
 async def _status_unlocked():
