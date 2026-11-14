@@ -55,34 +55,9 @@ After deploy, call authenticated `POST /flow/start`. The app starts Chromium and
 The noVNC page and WebSocket are protected by HTTP Basic Auth. Keep the password private and rotate it if exposed. The browser is still subject to Google's normal verification and product restrictions. This does not create a supported Google Flow API and does not guarantee automated video generation/download; it only provides a private remote desktop for the user-authorized browser.
 
 
-## Remote-browser 500 fix
+## Troubleshooting note (VNC HTTP 500)
 
-This revision fixes the noVNC HTTP 500 caused when Nginx workers cannot read
-`/etc/nginx/.htpasswd`: the entrypoint now assigns the password file to
-`www-data` and keeps it mode `640`. It also preserves the `/websockify` path
-when proxying WebSocket traffic to websockify.
-
-
-## Debian build dependency fix
-
-This revision pins the base image to Debian Bookworm, installs Chromium runtime
-libraries using Debian package names, and runs `playwright install chromium`
-without `--with-deps`. The previous build failed because Playwright's automatic
-apt dependency step requested `ttf-unifont` and `ttf-ubuntu-font-family`, names
-that are not available in the configured Debian package repositories.
-
-
-## Dockerfile syntax correction
-
-The prior archive accidentally doubled Dockerfile line-continuation backslashes,
-so Docker parsed `ffmpeg` as an instruction. This archive uses standard
-single-backslash continuations. Railway must still perform the actual image build.
-
-
-## Railway start-command correction
-
-Do not set a Railway custom Start Command for this image. The Dockerfile CMD
-starts `entrypoint.sh`, which creates the browser Basic-Auth file and launches
-supervisor (Xvfb, x11vnc, websockify, API, and Nginx). A Railway `startCommand`
-that runs Uvicorn directly bypasses that entrypoint and makes the remote-browser
-port fail. The included `railway.json` intentionally has no `startCommand`.
+The startup script sets `/etc/nginx/.htpasswd` to `root:www-data` with mode `0640`,
+so Debian Nginx workers can read the Basic Auth hash. Nginx access and error logs
+are sent to Railway stdout/stderr. Use the public domain mapped to port 8080 for
+`/vnc/vnc.html`; port 5900 is the raw VNC service and is not the browser URL.
